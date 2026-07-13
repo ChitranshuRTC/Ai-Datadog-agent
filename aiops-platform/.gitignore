@@ -1,0 +1,15 @@
+# Secrets and local runtime configuration
+.env
+
+# Python build and test artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local tooling and editor files
+.idea/
+.vscode/

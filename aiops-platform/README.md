@@ -35,6 +35,7 @@ app/
 ├── schemas/           OpenAPI request/response contracts
 ├── services/          application orchestration
 └── verification/      post-action health checks
+scripts/               operational investigation entry points
 tests/                 isolated API and unit tests
 ```
 
@@ -85,6 +86,8 @@ Compose loads `.env`, exposes the configured port, mounts application source rea
 | `SLACK_INCIDENT_CHANNEL` | Slack channel ID where parent incident messages are posted. |
 | `GITHUB_TOKEN` / `GITHUB_REPOSITORY` | Credentials and `owner/repository` for remediation PRs. |
 | `KUBERNETES_IN_CLUSTER` | Uses in-cluster authentication when `true`; otherwise local kubeconfig. |
+| `KUBECTL_PATH` | Path or command name for the investigation connector executable. |
+| `KUBECTL_TIMEOUT_SECONDS` | Maximum runtime for each safe kubectl command. |
 | `AUTO_REMEDIATION_ENABLED` | Enables action execution; defaults to `false`. |
 | `REMEDIATION_WAIT_SECONDS` | Delay before a health verification. |
 | `CORS_ALLOW_ORIGINS` | Comma-separated allowed origins, or `*`. |
@@ -106,6 +109,18 @@ Use a fine-grained token restricted to the remediation repository with Contents 
 ## Kubernetes setup
 
 Install a least-privilege service account with only the required verbs for pods, deployments, replicasets, logs, and deployment scales in intended namespaces. Set `KUBERNETES_IN_CLUSTER=true` in Kubernetes, or make a local kubeconfig available for development.
+
+## Kubernetes investigation layer
+
+The investigation layer is independent of the webhook flow. `KubernetesConnector` uses `asyncio.create_subprocess_exec` exclusively, never invokes a shell, applies a timeout to every `kubectl` process, and returns only parsed JSON or decoded text. `InvestigationService` composes pod manifest, description, logs, events, and an inferred deployment into an immutable Pydantic `InvestigationResult`; it deliberately does not notify Slack, call Datadog, or invoke AI.
+
+Run a manual investigation against the current Kubernetes context:
+
+```powershell
+python -m scripts.test_investigation
+```
+
+The script investigates `default/stress-app-77dfc6569f-g7t9k` and writes a formatted JSON report. Set `KUBECTL_PATH` when `kubectl` is not on `PATH`.
 
 ## Deployment
 
@@ -138,3 +153,4 @@ make clean     Remove local Python test cache
 - OpenTelemetry traces and metrics export.
 - Policy-as-code authorization for remediation actions.
 - Additional observability, ticketing, and infrastructure connectors.
+- AI-assisted analysis of typed Kubernetes investigation results.

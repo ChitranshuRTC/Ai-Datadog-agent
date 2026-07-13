@@ -7,8 +7,8 @@ test:
 	python -m pytest
 
 lint:
-	ruff check app tests
-	python -m compileall -q app tests
+	ruff check app tests scripts
+	python -m compileall -q app tests scripts
 
 docker:
 	docker compose up --build

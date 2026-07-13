@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     remediation_wait_seconds: int = Field(default=30, ge=0, le=600)
     auto_remediation_enabled: bool = Field(default=False)
     cors_allow_origins: str = Field(default="*")
+    kubectl_path: str = Field(default="kubectl", min_length=1)
+    kubectl_timeout_seconds: float = Field(default=20.0, gt=0, le=300)
 
     @property
     def cors_origins(self) -> list[str]:
