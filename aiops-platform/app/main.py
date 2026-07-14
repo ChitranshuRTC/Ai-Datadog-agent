@@ -23,6 +23,7 @@ from app.ai.prompt_builder import PromptBuilder
 from app.action_engine.engine import KubernetesActionEngine
 from app.action_engine.kubernetes import KubernetesConnector
 from app.connectors.github import GitHubConnector
+from app.connectors.github_ai import GitHubAIConnector
 from app.decision_engine.engine import DecisionEngine
 from app.decision_engine.root_cause_analyzer import RootCauseAnalyzer
 from app.decision_engine.rule_engine import RuleEngine
@@ -36,14 +37,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     slack_connector = SlackConnector.from_settings(get_settings())
     app.state.incident_service = IncidentService(SlackThreadManager(slack_connector, InMemoryThreadStore()))
     github = None
+    github_ai = None
     if settings.github_token and settings.github_repository:
         github = GitHubConnector(settings.github_token.get_secret_value(), settings.github_repository, settings.github_base_branch)
+        github_ai = GitHubAIConnector(settings.github_token.get_secret_value(), settings.github_repository, settings.github_base_branch)
     kubernetes = KubernetesConnector(settings.kubernetes_in_cluster)
     decision_engine = DecisionEngine(AIEngine(PromptBuilder(), IncidentAnalyzer()), RootCauseAnalyzer(), RuleEngine())
     app.state.remediation_service = RemediationService(
         decision_engine,
         KubernetesActionEngine(kubernetes, github),
         VerificationEngine(kubernetes, slack_connector, settings.remediation_wait_seconds),
+        github_ai=github_ai,
+        slack=slack_connector,
     )
     yield
     await app.state.incident_service.aclose()

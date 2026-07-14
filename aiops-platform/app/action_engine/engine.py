@@ -1,17 +1,32 @@
-"""Executes approved remediation decisions through infrastructure connectors."""
+"""Orchestrates approved remediation decisions into allow-listed Kubernetes actions.
 
-from app.action_engine.kubernetes import KubernetesConnector
+This engine never receives or executes raw text from Claude. A RemediationDecision
+carries only a validated `RemediationAction` enum member (see app.ai.response_parser),
+never a free-form command string, and every action is resolved against an explicit
+allow-list before anything touches the cluster. Anything not on the allow-list is
+rejected and reported back as a failed ActionResult -- it is never executed.
+"""
+
+from app.action_engine.kubernetes import ActionResult as KubernetesActionResult, KubernetesConnector
 from app.connectors.github import GitHubConnector
 from app.models.incident import Incident
 from app.models.remediation import ActionResult, RemediationAction, RemediationDecision
 
+_ALLOWED_ACTIONS: frozenset[str] = frozenset({
+    "restart_pod", "restart_deployment", "scale_deployment", "describe_pod",
+    "describe_node", "collect_logs", "collect_events", "patch_memory", "patch_cpu",
+    "cordon_node", "drain_node", "delete_pod", "no_action",
+})
+
+_ACTION_ALIASES: dict[str, str] = {"rollout_restart": "restart_deployment"}
+
 
 class KubernetesActionEngine:
-    """Translates remediation decisions into Kubernetes or GitHub operations."""
+    """Resolves a remediation decision against the allow-list and executes it."""
 
     def __init__(self, kubernetes: KubernetesConnector, github: GitHubConnector | None = None) -> None:
         self._kubernetes = kubernetes
-        self._github = github
+        self._github = github  # retained for constructor compatibility; unused by the Kubernetes allow-list
 
     async def execute(
         self,
@@ -24,70 +39,82 @@ class KubernetesActionEngine:
         cpu_limit: str | None = None,
         node_name: str | None = None,
     ) -> ActionResult:
-        """Execute the selected action and return an auditable result."""
-        action = decision.action
-        if action is RemediationAction.RESTART_POD:
+        """Execute the decision's action if and only if it is on the allow-list."""
+        raw_action = decision.action.value
+        action_name = _ACTION_ALIASES.get(raw_action, raw_action)
+        if action_name not in _ALLOWED_ACTIONS:
+            rejection = KubernetesActionResult(False, raw_action, f"Action '{raw_action}' is not on the Kubernetes action allow-list.", 0.0, {}, False)
+            return self._to_remediation_result(decision.action, rejection)
+        outcome = await self._dispatch(action_name, incident, decision, pod_name, replicas, memory_limit, cpu_limit, node_name)
+        return self._to_remediation_result(decision.action, outcome)
+
+    async def _dispatch(
+        self,
+        action_name: str,
+        incident: Incident,
+        decision: RemediationDecision,
+        pod_name: str | None,
+        replicas: int | None,
+        memory_limit: str | None,
+        cpu_limit: str | None,
+        node_name: str | None,
+    ) -> KubernetesActionResult:
+        """Call the matching allow-listed Kubernetes helper method."""
+        if action_name == "restart_pod":
             if not pod_name:
-                return ActionResult(action, False, "A pod name is required to restart a pod.")
-            await self._kubernetes.restart_pod(incident.namespace, pod_name)
-            return ActionResult(action, True, "Pod deletion requested; its controller will recreate it.", pod_name)
-        if action is RemediationAction.RESTART_DEPLOYMENT:
-            await self._kubernetes.restart_deployment(incident.namespace, incident.service)
-            return ActionResult(action, True, "Deployment rollout restart requested.", incident.service)
-        if action is RemediationAction.SCALE_DEPLOYMENT:
+                return self._missing_param("restart_pod", "A pod name is required to restart a pod.")
+            return await self._kubernetes.restart_pod(incident.namespace, pod_name)
+        if action_name == "restart_deployment":
+            return await self._kubernetes.restart_deployment(incident.namespace, incident.service)
+        if action_name == "scale_deployment":
             if replicas is None:
-                return ActionResult(action, False, "Scale actions require an explicit approved replica target.", incident.service)
-            await self._kubernetes.scale_deployment(incident.namespace, incident.service, replicas)
-            return ActionResult(action, True, f"Deployment scaled to {replicas} replicas.", incident.service)
-        if action is RemediationAction.ROLLBACK_DEPLOYMENT:
-            await self._kubernetes.rollback_deployment(incident.namespace, incident.service)
-            return ActionResult(action, True, "Deployment rollback requested.", incident.service)
-        if action is RemediationAction.DELETE_POD:
+                return self._missing_param("scale_deployment", "Scale actions require an explicit approved replica target.")
+            return await self._kubernetes.scale_deployment(incident.namespace, incident.service, replicas)
+        if action_name == "describe_pod":
             if not pod_name:
-                return ActionResult(action, False, "A pod name is required to delete a pod.")
-            await self._kubernetes.delete_pod(incident.namespace, pod_name)
-            return ActionResult(action, True, "Pod deletion requested.", pod_name)
-        if action is RemediationAction.COLLECT_LOGS:
+                return self._missing_param("describe_pod", "A pod name is required to describe a pod.")
+            return await self._kubernetes.describe_pod(incident.namespace, pod_name)
+        if action_name == "describe_node":
+            if not node_name:
+                return self._missing_param("describe_node", "A node name is required to describe a node.")
+            return await self._kubernetes.describe_node(node_name)
+        if action_name == "collect_logs":
             if not pod_name:
-                return ActionResult(action, False, "A pod name is required to collect logs.")
-            logs = await self._kubernetes.collect_logs(incident.namespace, pod_name)
-            return ActionResult(action, True, logs, pod_name)
-        if action is RemediationAction.PATCH_MEMORY:
+                return self._missing_param("collect_logs", "A pod name is required to collect logs.")
+            return await self._kubernetes.collect_logs(incident.namespace, pod_name)
+        if action_name == "collect_events":
+            if not pod_name:
+                return self._missing_param("collect_events", "A pod name is required to collect events.")
+            return await self._kubernetes.collect_events(incident.namespace, pod_name)
+        if action_name == "patch_memory":
             if memory_limit is None:
-                return ActionResult(action, False, "Patching memory requires an explicit approved memory limit.", incident.service)
-            await self._kubernetes.patch_memory(incident.namespace, incident.service, memory_limit)
-            return ActionResult(action, True, f"Deployment memory limit patched to {memory_limit}.", incident.service)
-        if action is RemediationAction.PATCH_CPU:
+                return self._missing_param("patch_memory", "Patching memory requires an explicit approved memory limit.")
+            return await self._kubernetes.patch_memory(incident.namespace, incident.service, memory_limit)
+        if action_name == "patch_cpu":
             if cpu_limit is None:
-                return ActionResult(action, False, "Patching CPU requires an explicit approved CPU limit.", incident.service)
-            await self._kubernetes.patch_cpu(incident.namespace, incident.service, cpu_limit)
-            return ActionResult(action, True, f"Deployment CPU limit patched to {cpu_limit}.", incident.service)
-        if action is RemediationAction.DESCRIBE_POD:
-            if not pod_name:
-                return ActionResult(action, False, "A pod name is required to describe a pod.")
-            description = await self._kubernetes.describe_pod(incident.namespace, pod_name)
-            return ActionResult(action, True, description, pod_name)
-        if action is RemediationAction.COLLECT_EVENTS:
-            if not pod_name:
-                return ActionResult(action, False, "A pod name is required to collect events.")
-            events = await self._kubernetes.collect_events(incident.namespace, pod_name)
-            return ActionResult(action, True, events, pod_name)
-        if action is RemediationAction.NODE_CORDON:
+                return self._missing_param("patch_cpu", "Patching CPU requires an explicit approved CPU limit.")
+            return await self._kubernetes.patch_cpu(incident.namespace, incident.service, cpu_limit)
+        if action_name == "cordon_node":
             if not node_name:
-                return ActionResult(action, False, "A node name is required to cordon a node.")
-            await self._kubernetes.cordon_node(node_name)
-            return ActionResult(action, True, "Node cordoned; no new pods will be scheduled on it.", node_name)
-        if action is RemediationAction.NODE_DRAIN:
+                return self._missing_param("cordon_node", "A node name is required to cordon a node.")
+            return await self._kubernetes.cordon_node(node_name)
+        if action_name == "drain_node":
             if not node_name:
-                return ActionResult(action, False, "A node name is required to drain a node.")
-            await self._kubernetes.drain_node(node_name)
-            return ActionResult(action, True, "Node cordoned and evictable pods drained.", node_name)
-        if action is RemediationAction.NO_ACTION:
-            return ActionResult(action, True, decision.reason or "No remediation action required.")
-        if action is RemediationAction.CREATE_GITHUB_PR:
-            if self._github is None:
-                return ActionResult(action, False, "GitHub integration is not configured.")
-            body = f"# AIOps remediation plan\n\nIncident: `{incident.identifier}`\n\n{decision.reason}\n\nRoot cause: {decision.root_cause.category}\nEvidence: {decision.root_cause.evidence}\n"
-            pull_request = await self._github.create_remediation_pull_request(f"aiops-{incident.identifier}", f"AIOps: remediate high memory for {incident.service}", body)
-            return ActionResult(action, True, "Created remediation pull request.", pull_request_url=pull_request.url)
-        return ActionResult(action, True, decision.reason)
+                return self._missing_param("drain_node", "A node name is required to drain a node.")
+            return await self._kubernetes.drain_node(node_name)
+        if action_name == "delete_pod":
+            if not pod_name:
+                return self._missing_param("delete_pod", "A pod name is required to delete a pod.")
+            return await self._kubernetes.delete_pod(incident.namespace, pod_name)
+        return KubernetesActionResult(True, "no_action", decision.reason or "No remediation action required.", 0.0, {}, False)
+
+    @staticmethod
+    def _missing_param(action: str, message: str) -> KubernetesActionResult:
+        """Build a rejected result for an allow-listed action missing a required parameter."""
+        return KubernetesActionResult(False, action, message, 0.0, {}, False)
+
+    @staticmethod
+    def _to_remediation_result(action: RemediationAction, outcome: KubernetesActionResult) -> ActionResult:
+        """Adapt the Kubernetes action engine's result into the shared pipeline contract."""
+        resource_name = outcome.details.get("pod") or outcome.details.get("deployment") or outcome.details.get("node")
+        return ActionResult(action, outcome.success, outcome.message, resource_name)

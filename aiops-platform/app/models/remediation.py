@@ -41,6 +41,8 @@ class RemediationDecision:
     action: RemediationAction
     reason: str
     root_cause: RootCause
+    github_fix: str | None = None
+    yaml_patch: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
