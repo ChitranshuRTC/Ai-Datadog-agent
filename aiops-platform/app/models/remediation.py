@@ -15,6 +15,13 @@ class RemediationAction(StrEnum):
     COLLECT_LOGS = "collect_logs"
     CREATE_GITHUB_PR = "create_github_pr"
     SLACK_NOTIFICATION = "slack_notification"
+    PATCH_MEMORY = "patch_memory"
+    PATCH_CPU = "patch_cpu"
+    DESCRIBE_POD = "describe_pod"
+    COLLECT_EVENTS = "collect_events"
+    NODE_CORDON = "node_cordon"
+    NODE_DRAIN = "node_drain"
+    NO_ACTION = "no_action"
 
 
 @dataclass(frozen=True, slots=True)

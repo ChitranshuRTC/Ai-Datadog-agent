@@ -64,6 +64,14 @@ class DatadogConnector:
             occurred_at=self._timestamp(payload),
             watchdog_summary=self._string(payload, "watchdog_summary", "text", "body", default="No Watchdog summary provided."),
             pod_name=tags.get("pod_name", tags.get("pod", None)),
+            event_type=self._optional_string(payload, "event_type"),
+            priority=self._optional_string(payload, "priority"),
+            monitor_link=self._optional_string(payload, "link"),
+            snapshot=self._optional_string(payload, "snapshot"),
+            alert_scope=self._optional_string(payload, "alert_scope"),
+            organization=self._organization(payload),
+            raw_payload=payload,
+            tags=tags,
         )
 
     @staticmethod
@@ -73,6 +81,22 @@ class DatadogConnector:
             if value is not None and str(value).strip():
                 return str(value).strip()
         return default
+
+    @staticmethod
+    def _optional_string(payload: dict[str, Any], *keys: str) -> str | None:
+        for key in keys:
+            value = payload.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return None
+
+    @staticmethod
+    def _organization(payload: dict[str, Any]) -> str | None:
+        organization = payload.get("org")
+        if not isinstance(organization, dict):
+            return None
+        value = organization.get("name")
+        return str(value).strip() if value is not None and str(value).strip() else None
 
     @staticmethod
     def _tags(payload: dict[str, Any]) -> dict[str, str]:
