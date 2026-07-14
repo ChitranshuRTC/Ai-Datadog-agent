@@ -32,50 +32,50 @@ class RootCauseAnalyzer:
         ),
         _CategoryRule(
             "OOMKilled", r"oomkilled|out of memory|memory limit exceeded", 0.97,
-            "Container was terminated after exceeding its memory limit.", RemediationAction.CREATE_GITHUB_PR,
+            "Container was terminated after exceeding its memory limit.", RemediationAction.RESTART_POD,
         ),
         _CategoryRule(
-            "ContainerCreating timeout", r"containercreating.*timeout|stuck.*containercreating|containercreating.*stuck", 0.85,
-            "Container has remained in ContainerCreating state beyond the expected startup window.", RemediationAction.DESCRIBE_POD,
+            "ContainerCreating", r"containercreating|container creating", 0.85,
+            "Container has remained stuck in the ContainerCreating state.", RemediationAction.COLLECT_LOGS,
         ),
         _CategoryRule(
-            "PVC Pending", r"pvc.*pending|persistentvolumeclaim.*pending|volume.*pending", 0.9,
-            "A PersistentVolumeClaim is unbound and remains in Pending state.", RemediationAction.COLLECT_EVENTS,
+            "PVCPending", r"pvc.*pending|persistentvolumeclaim.*pending|volume.*pending", 0.9,
+            "A PersistentVolumeClaim is unbound and remains in Pending state.", RemediationAction.SLACK_NOTIFICATION,
         ),
         _CategoryRule(
             "FailedScheduling", r"failedscheduling|failed scheduling|unschedulable", 0.95,
-            "The scheduler could not place the pod on any node.", RemediationAction.DESCRIBE_POD,
+            "The scheduler could not place the pod on any node.", RemediationAction.COLLECT_LOGS,
         ),
         _CategoryRule(
-            "Pending Pods", r"pending pod|pods? (?:is|are|stuck )?pending", 0.9,
-            "A pod remains unscheduled in the Pending phase.", RemediationAction.DESCRIBE_POD,
+            "Pending", r"pending pod|pods? (?:is|are|stuck )?pending", 0.9,
+            "A pod remains unscheduled in the Pending phase.", RemediationAction.COLLECT_LOGS,
         ),
         _CategoryRule(
             "NodeNotReady", r"node not ready|nodenotready|node.*notready", 0.95,
-            "A node has stopped reporting a Ready condition to the control plane.", RemediationAction.NODE_CORDON,
+            "A node has stopped reporting a Ready condition to the control plane.", RemediationAction.SLACK_NOTIFICATION,
         ),
         _CategoryRule(
             "DiskPressure", r"diskpressure|disk pressure|disk full|no space left|filesystem.*(?:full|usage)", 0.9,
-            "A node is reporting disk pressure from insufficient ephemeral storage.", RemediationAction.NODE_DRAIN,
+            "A node is reporting disk pressure from insufficient ephemeral storage.", RemediationAction.SLACK_NOTIFICATION,
         ),
         _CategoryRule(
             "MemoryPressure", r"memorypressure|memory pressure|node.*(?:low|out) of memory", 0.9,
-            "A node is reporting memory pressure and may begin evicting pods.", RemediationAction.NODE_DRAIN,
+            "A node is reporting memory pressure and may begin evicting pods.", RemediationAction.RESTART_POD,
         ),
         _CategoryRule(
             "DeploymentUnavailable", r"deploymentunavailable|deployment.*unavailable|minimumreplicasunavailable", 0.93,
             "The deployment does not have the minimum number of available replicas.", RemediationAction.RESTART_DEPLOYMENT,
         ),
         _CategoryRule(
-            "Container Restart Loop", r"container restart loop|restarting container|back-off restarting", 0.92,
+            "ContainerRestartLoop", r"container restart loop|restarting container|back-off restarting", 0.92,
             "The container is being repeatedly restarted by its kubelet back-off policy.", RemediationAction.RESTART_POD,
         ),
         _CategoryRule(
-            "High CPU", r"high cpu|cpu (?:usage|utilization|saturation)|cpu throttling", 0.9,
+            "HighCPU", r"high cpu|cpu (?:usage|utilization|saturation)|cpu throttling", 0.9,
             "Sustained high CPU utilization was detected on the workload.", RemediationAction.SCALE_DEPLOYMENT,
         ),
         _CategoryRule(
-            "High Memory", r"high memory|memory (?:usage|utilization)|heap", 0.9,
+            "HighMemory", r"high memory|memory (?:usage|utilization)|heap", 0.9,
             "Sustained high memory utilization was detected on the workload.", RemediationAction.RESTART_POD,
         ),
     )
