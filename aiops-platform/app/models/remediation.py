@@ -26,11 +26,12 @@ class RemediationAction(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RootCause:
-    """A classified likely cause and the supporting evidence."""
+    """A classified likely cause, its supporting evidence, and the suggested remediation."""
 
     category: str
     confidence: float
     evidence: str
+    recommended_action: RemediationAction
 
 
 @dataclass(frozen=True, slots=True)
